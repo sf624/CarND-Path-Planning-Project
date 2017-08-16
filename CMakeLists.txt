@@ -6,7 +6,7 @@ cmake_minimum_required (VERSION 3.5)
 
 
 
-add_definitions(-std=c++11)
+add_definitions(-std=c++11 -O3)
 
 
 
@@ -16,8 +16,12 @@ set(CMAKE_CXX_FLAGS, "${CXX_FLAGS}")
 
 
 
-set(sources src/main.cpp)
+set(sources src/opt.cpp src/main.cpp)
 
+
+include_directories(/usr/local/include)
+link_directories(/usr/local/lib)
+include_directories(src/Eigen-3.3)
 
 
 
@@ -44,4 +48,4 @@ add_executable(path_planning ${sources})
 
 
 
-target_link_libraries(path_planning z ssl uv uWS)
+target_link_libraries(path_planning ipopt z ssl uv uWS)

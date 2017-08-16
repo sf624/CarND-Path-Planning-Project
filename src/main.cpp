@@ -9,6 +9,7 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "json.hpp"
 #include "spline.h"
+#include "opt.h"
 
 using namespace std;
 
@@ -163,6 +164,8 @@ vector<double> getXY(double s, double d, vector<double> maps_s, vector<double> m
 int main() {
   uWS::Hub h;
 
+  OPT opt;
+
   // Load up map values for waypoint's x,y,s and d normalized normal vectors
   vector<double> map_waypoints_x;
   vector<double> map_waypoints_y;
@@ -197,7 +200,7 @@ int main() {
   	map_waypoints_dy.push_back(d_y);
   }
 
-  h.onMessage([&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
+  h.onMessage([&opt,&map_waypoints_x,&map_waypoints_y,&map_waypoints_s,&map_waypoints_dx,&map_waypoints_dy](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length,
                      uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
@@ -242,6 +245,43 @@ int main() {
             static double ref_vel = 0;
             int prev_size = previous_path_x.size();
 
+            // Trajectory is made up of multiple 3sec long sub-trajectory.
+            // This program maintains the remaining trajectory to be 3 sec long,
+
+            vector<double> next_x_vals;
+            vector<double> next_y_vals;
+            next_x_vals.push_back(car_x);
+            next_y_vals.push_back(car_y);
+
+            // Add trajectory so that duration becomase 3sec.
+            // Maintain first 1sec trajectory considering latency.
+
+            const double max_acc = 5.0;   // m/s^2
+            const double max_jerk = 5.0;  // m/s^3
+
+            int reused_size = prev_size < 50 ? prev_size : 50;
+            for(int i=0; i<reused_size; i++){
+              next_x_vals.push_back(previous_path_x[i]);
+              next_y_vals.push_back(previous_path_y[i]);
+            }
+
+
+            int N = 150 - reused_size;
+
+            Eigen::VectorXd state(6);
+            if(opt.is_initial){
+              state << 0, 0, 0, 0, 0, 0;
+            }
+            else{
+              state << 0, 0, 0, 0, 0, 0;
+            }
+
+            Eigen::VectorXd params(1);
+            params << N;
+
+            opt.Solve(state, params);
+
+            /*
             // Sensor fusion START
             if(prev_size>0){
               car_s = end_path_s;
@@ -364,7 +404,7 @@ int main() {
 
               next_x_vals.push_back(x_point);
               next_y_vals.push_back(y_point);
-            }
+            }*/
 
             json msgJson;
 
