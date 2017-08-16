@@ -76,12 +76,12 @@ class FG_eval {
     //
     // NOTE: In this section you'll setup the model constraints.
 
-    fg[1 + s_start] = 0;
-    fg[1 + d_start] = 0;
-    fg[1 + vs_start] = 0;
-    fg[1 + vd_start] = 0;
-    fg[1 + as_start] = 0;
-    fg[1 + ad_start] = 0;
+    fg[1 + s_start] = vars[s_start];
+    fg[1 + d_start] = vars[d_start];
+    fg[1 + vs_start] = vars[vs_start];
+    fg[1 + vd_start] = vars[vd_start];
+    fg[1 + as_start] = vars[as_start];
+    fg[1 + ad_start] = vars[ad_start];
 
     // Integral Constraints
     for (int t = 1; t < N; t++) {
@@ -184,20 +184,6 @@ vector<double> OPT::Solve(Eigen::VectorXd state, Eigen::VectorXd params) {
     vars_upperbound[jd_start + t] = 5.0;
   }
 
-  vars_lowerbound[s_start] = s;
-  vars_lowerbound[d_start] = d;
-  vars_lowerbound[vs_start] = vs;
-  vars_lowerbound[vd_start] = vd;
-  vars_lowerbound[as_start] = as;
-  vars_lowerbound[ad_start] = ad;
-
-  vars_upperbound[s_start] = s;
-  vars_upperbound[d_start] = d;
-  vars_upperbound[vs_start] = vs;
-  vars_upperbound[vd_start] = vd;
-  vars_upperbound[as_start] = as;
-  vars_upperbound[ad_start] = ad;
-
 
   // Set lower and upper boundary for the constraints
   Dvector constraints_lowerbound(n_constraints);
@@ -206,6 +192,19 @@ vector<double> OPT::Solve(Eigen::VectorXd state, Eigen::VectorXd params) {
     constraints_lowerbound[i] = 0;
     constraints_upperbound[i] = 0;
   }
+  constraints_lowerbound[s_start] = s;
+  constraints_lowerbound[d_start] = d;
+  constraints_lowerbound[vs_start] = vs;
+  constraints_lowerbound[vd_start] = vd;
+  constraints_lowerbound[as_start] = as;
+  constraints_lowerbound[ad_start] = ad;
+
+  constraints_upperbound[s_start] = s;
+  constraints_upperbound[d_start] = d;
+  constraints_upperbound[vs_start] = vs;
+  constraints_upperbound[vd_start] = vd;
+  constraints_upperbound[as_start] = as;
+  constraints_upperbound[ad_start] = ad;
 
   // object that computes objective and constraints
   FG_eval fg_eval(params);
