@@ -66,7 +66,7 @@ class FG_eval {
       fg[0] += CppAD::pow(vars[js_start + t], 2);
       fg[0] += CppAD::pow(vars[jd_start + t], 2);
       // Add cost to difference between reference velocity in s_direction.
-      fg[0] += CppAD::pow(vars[vs_start + t] - ref_v, 2);
+      fg[0] += 1e5 * CppAD::pow(vars[vs_start + t] - ref_v, 2);
       // Add cost to difference between reference lane positon in d_direction.
       fg[0] += CppAD::pow(vars[d_start + t] - ref_d, 2);
     }

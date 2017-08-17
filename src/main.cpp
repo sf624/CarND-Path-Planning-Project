@@ -226,6 +226,7 @@ int main() {
           	double car_d = j[1]["d"];
           	double car_yaw = j[1]["yaw"];
           	double car_speed = j[1]["speed"];
+            cout << car_yaw << endl;
 
           	// Previous path data given to the Planner
           	auto previous_path_x = j[1]["previous_path_x"];
@@ -259,18 +260,18 @@ int main() {
             const double max_acc = 5.0;   // m/s^2
             const double max_jerk = 5.0;  // m/s^3
 
-            int reused_size = prev_size < 50 ? prev_size : 50;
-            for(int i=0; i<reused_size; i++){
-              next_x_vals.push_back(previous_path_x[i]);
-              next_y_vals.push_back(previous_path_y[i]);
-            }
+            //int reused_size = prev_size < 50 ? prev_size : 50;
+            //for(int i=0; i<reused_size-1; i++){
+            //  next_x_vals.push_back(previous_path_x[i]);
+            //  next_y_vals.push_back(previous_path_y[i]);
+            //}
 
 
-            int N = 150 - reused_size;
+            int N = 150;// - reused_size;
 
             Eigen::VectorXd state(6);
-            if(opt.is_initial){
-              state << 0, 0, 0, 0, 0, 0;
+            if(true){//opt.is_initial){
+              state << car_s, car_d, car_speed, 0, 0, 0;
             }
             else{
               state << 0, 0, 0, 0, 0, 0;
@@ -279,7 +280,15 @@ int main() {
             Eigen::VectorXd params(1);
             params << N;
 
-            opt.Solve(state, params);
+            vector<double> solution = opt.Solve(state, params);
+
+            for(int i=0; i<N; i++){
+              double s = solution[i];
+              double d = solution[i + N];
+              vector<double> xy = getXY(s, d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
+              next_x_vals.push_back(xy[0]);
+              next_y_vals.push_back(xy[1]);
+            }
 
             /*
             // Sensor fusion START
@@ -348,7 +357,7 @@ int main() {
               ptsy.push_back(ref_y);
             }
 
-            vector<double> next_wp0 = getXY(car_s+30, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+            vector<double> next_wp0 =
             vector<double> next_wp1 = getXY(car_s+60, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
             vector<double> next_wp2 = getXY(car_s+90, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
 
