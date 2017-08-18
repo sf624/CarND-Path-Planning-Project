@@ -42,7 +42,10 @@ class FG_eval {
  public:
   // Fitted polynomial paramicients
   Eigen::VectorXd params;
-  FG_eval(Eigen::VectorXd params) { this->params = params; }
+  tk::spline waypoint_spline;
+  FG_eval(Eigen::VectorXd params){
+    this->params = params;
+  }
 
   typedef CPPAD_TESTVECTOR(AD<double>) ADvector;
   void operator()(ADvector& fg, const ADvector& vars) {
@@ -52,7 +55,7 @@ class FG_eval {
     // the Solver function below.
 
     int N = params[0];
-
+    double ref_d = params[1];
     // The cost is stored is the first element of `fg`.
     // Any additions to the cost should be added to `fg[0]`.
     fg[0] = 0;
@@ -66,9 +69,11 @@ class FG_eval {
       fg[0] += CppAD::pow(vars[js_start + t], 2);
       fg[0] += CppAD::pow(vars[jd_start + t], 2);
       // Add cost to difference between reference velocity in s_direction.
-      fg[0] += 1e5 * CppAD::pow(vars[vs_start + t] - ref_v, 2);
+      fg[0] += 10 * CppAD::pow(
+        CppAD::sqrt(CppAD::pow(vars[vs_start + t], 2)+CppAD::pow(vars[vd_start + t], 2))
+         - ref_v,2);
       // Add cost to difference between reference lane positon in d_direction.
-      fg[0] += CppAD::pow(vars[d_start + t] - ref_d, 2);
+      fg[0] += 10 * CppAD::pow(vars[d_start + t] - ref_d, 2);
     }
 
     //

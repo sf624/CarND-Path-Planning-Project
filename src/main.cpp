@@ -240,6 +240,7 @@ int main() {
             // Data format: [id,x,y,vx,vy,s,d]
           	auto sensor_fusion = j[1]["sensor_fusion"];
 
+            cout << "pass (1)" << endl;
 
           	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
             static int lane = 1;
@@ -251,8 +252,6 @@ int main() {
 
             vector<double> next_x_vals;
             vector<double> next_y_vals;
-            next_x_vals.push_back(car_x);
-            next_y_vals.push_back(car_y);
 
             // Add trajectory so that duration becomase 3sec.
             // Maintain first 1sec trajectory considering latency.
@@ -260,34 +259,110 @@ int main() {
             const double max_acc = 5.0;   // m/s^2
             const double max_jerk = 5.0;  // m/s^3
 
-            //int reused_size = prev_size < 50 ? prev_size : 50;
-            //for(int i=0; i<reused_size-1; i++){
-            //  next_x_vals.push_back(previous_path_x[i]);
-            //  next_y_vals.push_back(previous_path_y[i]);
-            //}
+            int reused_size = prev_size < 50 ? prev_size : 50;
+            for(int i=0; i<reused_size; i++){
+              next_x_vals.push_back(previous_path_x[i]);
+              next_y_vals.push_back(previous_path_y[i]);
+            }
 
+            cout << "pass (2)" << endl;
 
-            int N = 150;// - reused_size;
+            vector<double> ptsx;
+            vector<double> ptsy;
+
+            double ref_x = car_x;
+            double ref_y = car_y;
+            double ref_yaw = deg2rad(car_yaw);
+
+            if(!opt.is_initial){
+              ref_x = previous_path_x[reused_size-1];
+              ref_y = previous_path_y[reused_size-1];
+
+              double ref_x_prev = previous_path_x[reused_size-2];
+              double ref_y_prev = previous_path_y[reused_size-2];
+              ref_yaw = atan2(ref_y - ref_y_prev, ref_x - ref_x_prev);
+
+              ptsx.push_back(previous_path_x[reused_size-3]);
+              ptsx.push_back(ref_x_prev);
+              ptsx.push_back(ref_x);
+
+              ptsx.push_back(previous_path_y[reused_size-3]);
+              ptsy.push_back(ref_y_prev);
+              ptsy.push_back(ref_y);
+            }
+
+            for(int i=0; i<ptsx.size(); i++){
+              double shift_x = ptsx[i] - ref_x;
+              double shift_y = ptsy[i] - ref_y;
+
+              ptsx[i] = (shift_x * cos(0-ref_yaw) - shift_y * sin(0-ref_yaw));
+              ptsy[i] = (shift_x * sin(0-ref_yaw) + shift_y * cos(0-ref_yaw));
+            }
+
+            cout << "pass (3)" << endl;
+
+            vector<double> _map_waypoints_s;
+            vector<double> _map_waypoints_x;
+            vector<double> _map_waypoints_y;
+            int nextwaypoint = NextWaypoint(ref_x,ref_y,ref_yaw,map_waypoints_x,map_waypoints_y);
+
+            for(int i=0; i<4; i++){
+              _map_waypoints_s.push_back(map_waypoints_s[(nextwaypoint+i-2)%map_waypoints_s.size()]);
+              vector<double> xy = getXY(_map_waypoints_s[i], (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
+              _map_waypoints_x.push_back(xy[0]);
+              _map_waypoints_y.push_back(xy[1]);
+            }
+
+            for(int i=0; i<_map_waypoints_x.size(); i++){
+              double shift_x = _map_waypoints_x[i] - ref_x;
+              double shift_y = _map_waypoints_y[i] - ref_y;
+
+              _map_waypoints_x[i] = (shift_x * cos(0-ref_yaw) - shift_y * sin(0-ref_yaw));
+              _map_waypoints_y[i] = (shift_x * sin(0-ref_yaw) + shift_y * cos(0-ref_yaw));
+            }
+
+            tk::spline waypoint_spline;
+            waypoint_spline.set_points(_map_waypoints_x, _map_waypoints_y);
+
+            int N = 150 - reused_size + 1;
+
+            cout << "pass(4)" << endl;
 
             Eigen::VectorXd state(6);
-            if(true){//opt.is_initial){
-              state << car_s, car_d, car_speed, 0, 0, 0;
-            }
-            else{
+            if(opt.is_initial){
               state << 0, 0, 0, 0, 0, 0;
             }
+            else{
+              // Estimate velocity and acceleration
+              double vx_prev = (ptsx[1] - ptsx[0])/0.02;
+              double vy_prev = (ptsy[1] - ptsy[0])/0.02;
+              double vx_ref = (ptsx[2] - ptsx[1])/0.02;
+              double vy_ref = (ptsy[2] - ptsy[1])/0.02;
+              double ax_ref = (vx_ref - vx_prev)/0.02;
+              double ay_ref = (vy_ref - vy_prev)/0.02;
+              state << 0, 0, vx_ref, vy_ref, ax_ref, ay_ref;
+            }
 
-            Eigen::VectorXd params(1);
-            params << N;
+            Eigen::VectorXd params(2);
+            params << N , waypoint_spline(2+4*lane);
 
             vector<double> solution = opt.Solve(state, params);
 
-            for(int i=0; i<N; i++){
-              double s = solution[i];
-              double d = solution[i + N];
-              vector<double> xy = getXY(s, d, map_waypoints_s, map_waypoints_x, map_waypoints_y);
-              next_x_vals.push_back(xy[0]);
-              next_y_vals.push_back(xy[1]);
+            for(int i=1; i<N; i++){
+              double x_point = solution[i];
+              double y_point = solution[i+N];
+
+              double x_ref = x_point;
+              double y_ref = y_point;
+
+              x_point = (x_ref * cos(ref_yaw) - y_ref * sin(ref_yaw));
+              y_point = (x_ref * sin(ref_yaw) + y_ref * cos(ref_yaw));
+
+              x_point += ref_x;
+              y_point += ref_y;
+
+              next_x_vals.push_back(x_point);
+              next_y_vals.push_back(y_point);
             }
 
             /*
