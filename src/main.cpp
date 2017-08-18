@@ -226,7 +226,6 @@ int main() {
           	double car_d = j[1]["d"];
           	double car_yaw = j[1]["yaw"];
           	double car_speed = j[1]["speed"];
-            cout << car_yaw << endl;
 
           	// Previous path data given to the Planner
           	auto previous_path_x = j[1]["previous_path_x"];
@@ -240,147 +239,12 @@ int main() {
             // Data format: [id,x,y,vx,vy,s,d]
           	auto sensor_fusion = j[1]["sensor_fusion"];
 
-            cout << "pass (1)" << endl;
 
           	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
-            static int lane = 1;
+            int lane = (int)(car_s / 100)%3;
             static double ref_vel = 0;
             int prev_size = previous_path_x.size();
 
-            // Trajectory is made up of multiple 3sec long sub-trajectory.
-            // This program maintains the remaining trajectory to be 3 sec long,
-
-            vector<double> next_x_vals;
-            vector<double> next_y_vals;
-
-            // Add trajectory so that duration becomase 3sec.
-            // Maintain first 1sec trajectory considering latency.
-
-            const double max_acc = 5.0;   // m/s^2
-            const double max_jerk = 5.0;  // m/s^3
-
-            int reused_size = prev_size < 50 ? prev_size : 50;
-            for(int i=0; i<reused_size; i++){
-              next_x_vals.push_back(previous_path_x[i]);
-              next_y_vals.push_back(previous_path_y[i]);
-            }
-
-            cout << "pass (2)" << endl;
-
-            vector<double> ptsx;
-            vector<double> ptsy;
-
-            double ref_x = car_x;
-            double ref_y = car_y;
-            double ref_yaw = deg2rad(car_yaw);
-
-            if(!opt.is_initial && reused_size > 2){
-              ref_x = previous_path_x[reused_size-1];
-              ref_y = previous_path_y[reused_size-1];
-
-              double ref_x_prev = previous_path_x[reused_size-2];
-              double ref_y_prev = previous_path_y[reused_size-2];
-              ref_yaw = atan2(ref_y - ref_y_prev, ref_x - ref_x_prev);
-
-              ptsx.push_back(previous_path_x[reused_size-3]);
-              ptsx.push_back(ref_x_prev);
-              ptsx.push_back(ref_x);
-
-              ptsx.push_back(previous_path_y[reused_size-3]);
-              ptsy.push_back(ref_y_prev);
-              ptsy.push_back(ref_y);
-            }
-
-            for(int i=0; i<ptsx.size(); i++){
-              double shift_x = ptsx[i] - ref_x;
-              double shift_y = ptsy[i] - ref_y;
-
-              ptsx[i] = (shift_x * cos(0-ref_yaw) - shift_y * sin(0-ref_yaw));
-              ptsy[i] = (shift_x * sin(0-ref_yaw) + shift_y * cos(0-ref_yaw));
-            }
-
-            cout << "pass (3)" << endl;
-
-            vector<double> _map_waypoints_s;
-            vector<double> _map_waypoints_x;
-            vector<double> _map_waypoints_y;
-
-            cout << "pass (3.0.1)" << endl;
-
-            cout << ref_x << "," << ref_y << "," << ref_yaw << endl;
-            int nextwaypoint = NextWaypoint(ref_x,ref_y,ref_yaw,map_waypoints_x,map_waypoints_y);
-
-            cout << "pass (3.1)" << endl;
-
-            for(int i=0; i<4; i++){
-              int idx = nextwaypoint+i-2;
-              while(idx < 0) idx += map_waypoints_s.size();
-              while(idx >= map_waypoints_s.size()) idx -= map_waypoints_s.size();
-              _map_waypoints_s.push_back(map_waypoints_s[idx]);
-              vector<double> xy = getXY(_map_waypoints_s[i], (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
-              _map_waypoints_x.push_back(xy[0]);
-              _map_waypoints_y.push_back(xy[1]);
-            }
-
-            cout << "pass (3.2)" << endl;
-
-
-            for(int i=0; i<_map_waypoints_x.size(); i++){
-              double shift_x = _map_waypoints_x[i] - ref_x;
-              double shift_y = _map_waypoints_y[i] - ref_y;
-
-              _map_waypoints_x[i] = (shift_x * cos(0-ref_yaw) - shift_y * sin(0-ref_yaw));
-              _map_waypoints_y[i] = (shift_x * sin(0-ref_yaw) + shift_y * cos(0-ref_yaw));
-            }
-
-            cout << "pass (3.3)" << endl;
-
-
-            tk::spline waypoint_spline;
-            waypoint_spline.set_points(_map_waypoints_x, _map_waypoints_y);
-
-            int N = 150 - reused_size + 1;
-
-            cout << "pass(4)" << endl;
-
-            Eigen::VectorXd state(6);
-            if(opt.is_initial){
-              state << 0, 0, 0, 0, 0, 0;
-            }
-            else{
-              // Estimate velocity and acceleration
-              double vx_prev = (ptsx[1] - ptsx[0])/0.02;
-              double vy_prev = (ptsy[1] - ptsy[0])/0.02;
-              double vx_ref = (ptsx[2] - ptsx[1])/0.02;
-              double vy_ref = (ptsy[2] - ptsy[1])/0.02;
-              double ax_ref = (vx_ref - vx_prev)/0.02;
-              double ay_ref = (vy_ref - vy_prev)/0.02;
-              state << 0, 0, vx_ref, vy_ref, ax_ref, ay_ref;
-            }
-
-            Eigen::VectorXd params(2);
-            params << N , waypoint_spline(2+4*lane);
-
-            vector<double> solution = opt.Solve(state, params);
-
-            for(int i=1; i<N; i++){
-              double x_point = solution[i];
-              double y_point = solution[i+N];
-
-              double x_ref = x_point;
-              double y_ref = y_point;
-
-              x_point = (x_ref * cos(ref_yaw) - y_ref * sin(ref_yaw));
-              y_point = (x_ref * sin(ref_yaw) + y_ref * cos(ref_yaw));
-
-              x_point += ref_x;
-              y_point += ref_y;
-
-              next_x_vals.push_back(x_point);
-              next_y_vals.push_back(y_point);
-            }
-
-            /*
             // Sensor fusion START
             if(prev_size>0){
               car_s = end_path_s;
@@ -447,18 +311,6 @@ int main() {
               ptsy.push_back(ref_y);
             }
 
-            vector<double> next_wp0 =
-            vector<double> next_wp1 = getXY(car_s+60, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
-            vector<double> next_wp2 = getXY(car_s+90, (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
-
-            ptsx.push_back(next_wp0[0]);
-            ptsx.push_back(next_wp1[0]);
-            ptsx.push_back(next_wp2[0]);
-
-            ptsy.push_back(next_wp0[1]);
-            ptsy.push_back(next_wp1[1]);
-            ptsy.push_back(next_wp2[1]);
-
             for(int i=0; i<ptsx.size(); i++){
               double shift_x = ptsx[i] - ref_x;
               double shift_y = ptsy[i] - ref_y;
@@ -467,9 +319,46 @@ int main() {
               ptsy[i] = (shift_x * sin(0-ref_yaw) + shift_y * cos(0-ref_yaw));
             }
 
-            tk::spline s;
+            /*
+             * Generate target-lane spline in reference frame, using 5 closest waypoint.
+            */
 
-            s.set_points(ptsx, ptsy);
+            vector<double> ptsx_lane;
+            vector<double> ptsy_lane;
+            int closestWaypoint = ClosestWaypoint(ref_x, ref_y, map_waypoints_x, map_waypoints_y);
+            for(int i=0; i<5; i++){
+              int idx = (closestWaypoint + i - 2 + map_waypoints_s.size()) % map_waypoints_s.size();
+              ptsx_lane.push_back(map_waypoints_x[idx] + (2+4*lane) * map_waypoints_dx[idx]);
+              ptsy_lane.push_back(map_waypoints_y[idx] + (2+4*lane) * map_waypoints_dy[idx]);
+              cout << idx << "," << ptsx_lane[i] << endl;
+            }
+
+            for(int i=0; i<ptsx_lane.size(); i++){
+              double shift_x = ptsx_lane[i] - ref_x;
+              double shift_y = ptsy_lane[i] - ref_y;
+
+              ptsx_lane[i] = (shift_x * cos(0-ref_yaw) - shift_y * sin(0-ref_yaw));
+              ptsy_lane[i] = (shift_x * sin(0-ref_yaw) + shift_y * cos(0-ref_yaw));
+              cout << i << "," << ptsx_lane[i] << endl;
+            }
+
+            tk::spline lane_spline;
+            lane_spline.set_points(ptsx_lane, ptsy_lane);
+
+            /*
+             * Generate target-trajectory spline in reference frame, using target-lane spline.
+             */
+
+            // Intend to reach target-lane in 2 seconds.
+            for(int i=0; i<3; i++){
+              double speed = car_speed < 25 ? 25 : car_speed;
+              double x = 2*(i+1) * speed * 0.44704;
+              ptsx.push_back(x);
+              ptsy.push_back(lane_spline(x));
+            }
+
+            tk::spline trajectory_spline;
+            trajectory_spline.set_points(ptsx, ptsy);
 
             vector<double> next_x_vals;
           	vector<double> next_y_vals;
@@ -480,7 +369,7 @@ int main() {
             }
 
             double target_x = 30.0;
-            double target_y = s(target_x);
+            double target_y = trajectory_spline(target_x);
             double target_dist = sqrt(pow(target_x,2)+pow(target_y,2));
 
             double x_add_on = 0;
@@ -488,7 +377,7 @@ int main() {
             for(int i=0; i<=50-previous_path_x.size(); i++){
               double N = (target_dist/(0.02*ref_vel/2.24));
               double x_point = x_add_on + target_x/N;
-              double y_point = s(x_point);
+              double y_point = trajectory_spline(x_point);
 
               x_add_on = x_point;
 
@@ -503,7 +392,7 @@ int main() {
 
               next_x_vals.push_back(x_point);
               next_y_vals.push_back(y_point);
-            }*/
+            }
 
             json msgJson;
 
