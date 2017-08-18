@@ -269,7 +269,7 @@ int main() {
               }
             }
 
-            if(too_close && ref_vel > leading_car_speed - 0.5){
+            if(too_close && ref_vel > leading_car_speed - 5){
               ref_vel -= 0.224;
             }
             else if(ref_vel < 49.5){
