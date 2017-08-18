@@ -65,12 +65,9 @@ int ClosestWaypoint(double x, double y, vector<double> maps_x, vector<double> ma
 
 int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y)
 {
-  cout << "1" << endl;
 	int closestWaypoint = ClosestWaypoint(x,y,maps_x,maps_y);
-  cout << "2" << endl;
 	double map_x = maps_x[closestWaypoint];
 	double map_y = maps_y[closestWaypoint];
-  cout << "3" << endl;
 	double heading = atan2( (map_y-y),(map_x-x) );
 
 	double angle = abs(theta-heading);
@@ -241,9 +238,10 @@ int main() {
 
 
           	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
-            int lane = (int)(car_s / 100)%3;
+            static int lane = 1;
             static double ref_vel = 0;
             int prev_size = previous_path_x.size();
+            //prev_size = prev_size < 2 ? prev_size : 2;
 
             // Sensor fusion START
             if(prev_size>0){
@@ -253,6 +251,7 @@ int main() {
             bool too_close = false;
 
             //find ref_v to use
+            double leading_car_speed = 50;
             for(int i=0; i<sensor_fusion.size(); i++){
               float d = sensor_fusion[i][6];
               if(d < (2+4*lane+2) && d > (2+4*lane-2)){
@@ -264,18 +263,19 @@ int main() {
                 check_car_s += (double)prev_size * 0.02 * check_speed;
 
                 if((check_car_s>car_s) && ((check_car_s-car_s)<30)){
-                  //ref_vel = 29.5;
+                  leading_car_speed = check_speed * 2.24;
                   too_close = true;
                 }
               }
             }
 
-            if(too_close){
+            if(too_close && ref_vel > leading_car_speed - 0.5){
               ref_vel -= 0.224;
             }
             else if(ref_vel < 49.5){
               ref_vel += 0.224;
             }
+
             // Sensor fusion END
 
 
@@ -323,81 +323,160 @@ int main() {
              * Generate target-lane spline in reference frame, using 5 closest waypoint.
             */
 
-            vector<double> ptsx_lane;
-            vector<double> ptsy_lane;
-            int closestWaypoint = ClosestWaypoint(ref_x, ref_y, map_waypoints_x, map_waypoints_y);
-            for(int i=0; i<5; i++){
-              int idx = (closestWaypoint + i - 2 + map_waypoints_s.size()) % map_waypoints_s.size();
-              ptsx_lane.push_back(map_waypoints_x[idx] + (2+4*lane) * map_waypoints_dx[idx]);
-              ptsy_lane.push_back(map_waypoints_y[idx] + (2+4*lane) * map_waypoints_dy[idx]);
-              cout << idx << "," << ptsx_lane[i] << endl;
+            vector<vector<double>> x_candidates;
+            vector<vector<double>> y_candidates;
+
+            for(int lane=0; lane<3; lane++){
+              tk::spline lane_spline;
+              vector<double> ptsx_lane;
+              vector<double> ptsy_lane;
+
+              int closestWaypoint = ClosestWaypoint(ref_x, ref_y, map_waypoints_x, map_waypoints_y);
+              for(int i=0; i<3; i++){
+                int idx = (closestWaypoint + i - 1 + map_waypoints_s.size()) % map_waypoints_s.size();
+                ptsx_lane.push_back(map_waypoints_x[idx] + (2+4*lane) * map_waypoints_dx[idx]);
+                ptsy_lane.push_back(map_waypoints_y[idx] + (2+4*lane) * map_waypoints_dy[idx]);
+                //cout << idx << "," << ptsx_lane[i] << endl;
+              }
+
+              for(int i=0; i<ptsx_lane.size(); i++){
+                double shift_x = ptsx_lane[i] - ref_x;
+                double shift_y = ptsy_lane[i] - ref_y;
+
+                ptsx_lane[i] = (shift_x * cos(0-ref_yaw) - shift_y * sin(0-ref_yaw));
+                ptsy_lane[i] = (shift_x * sin(0-ref_yaw) + shift_y * cos(0-ref_yaw));
+                //cout << i << "," << ptsx_lane[i] << endl;
+              }
+
+              lane_spline.set_points(ptsx_lane, ptsy_lane);
+
+              /*
+               * Generate target-trajectory spline in reference frame, using target-lane spline.
+               */
+
+              // Intend to reach target-lane in 2 seconds.
+              vector<double> temp_ptsx;
+              vector<double> temp_ptsy;
+              copy(ptsx.begin(),ptsx.end(),back_inserter(temp_ptsx));
+              copy(ptsy.begin(),ptsy.end(),back_inserter(temp_ptsy));
+
+              for(int i=0; i<3; i++){
+                double speed = car_speed < 25 ? 25 : car_speed;
+                double x = 2*(i+1) * speed * 0.44704;
+                temp_ptsx.push_back(x);
+                temp_ptsy.push_back(lane_spline(x));
+              }
+
+              tk::spline trajectory_spline;
+              trajectory_spline.set_points(temp_ptsx, temp_ptsy);
+
+              vector<double> next_x_vals;
+              vector<double> next_y_vals;
+
+              for(int i=0; i<prev_size; i++){
+                next_x_vals.push_back(previous_path_x[i]);
+                next_y_vals.push_back(previous_path_y[i]);
+              }
+
+              double target_x = 30.0;
+              double target_y = trajectory_spline(target_x);
+              double target_dist = sqrt(pow(target_x,2)+pow(target_y,2));
+
+              double x_add_on = 0;
+              //double target_speed = i == lane ? ref_vel : (ref_vel > 49.5 ? ref_vel : ref_vel + 0.224);
+
+              for(int i=0; i<250-prev_size; i++){
+                double target_speed = i == lane ? ref_vel : (ref_vel > 49.5 ? ref_vel : ref_vel + 0.224);
+                double N = (target_dist/(0.02*target_speed/2.24));
+                double x_point = x_add_on + target_x/N;
+                double y_point = trajectory_spline(x_point);
+
+                x_add_on = x_point;
+
+                double x_ref = x_point;
+                double y_ref = y_point;
+
+                x_point = (x_ref * cos(ref_yaw) - y_ref * sin(ref_yaw));
+                y_point = (x_ref * sin(ref_yaw) + y_ref * cos(ref_yaw));
+
+                x_point += ref_x;
+                y_point += ref_y;
+
+                next_x_vals.push_back(x_point);
+                next_y_vals.push_back(y_point);
+              }
+
+              x_candidates.push_back(next_x_vals);
+              y_candidates.push_back(next_y_vals);
             }
-
-            for(int i=0; i<ptsx_lane.size(); i++){
-              double shift_x = ptsx_lane[i] - ref_x;
-              double shift_y = ptsy_lane[i] - ref_y;
-
-              ptsx_lane[i] = (shift_x * cos(0-ref_yaw) - shift_y * sin(0-ref_yaw));
-              ptsy_lane[i] = (shift_x * sin(0-ref_yaw) + shift_y * cos(0-ref_yaw));
-              cout << i << "," << ptsx_lane[i] << endl;
-            }
-
-            tk::spline lane_spline;
-            lane_spline.set_points(ptsx_lane, ptsy_lane);
 
             /*
-             * Generate target-trajectory spline in reference frame, using target-lane spline.
-             */
+            * If too_close, attempt other trajectory.
+            * In order to proceed, other trajectories are evaluated.
+            */
 
-            // Intend to reach target-lane in 2 seconds.
-            for(int i=0; i<3; i++){
-              double speed = car_speed < 25 ? 25 : car_speed;
-              double x = 2*(i+1) * speed * 0.44704;
-              ptsx.push_back(x);
-              ptsy.push_back(lane_spline(x));
+            double min_cost = 1.0e19;
+            int min_cost_idx = 0;
+            for(int k=1; k<3; k++){
+              int i = (lane+k)%3;
+              double cost = 0;
+              for(int t=0; t<x_candidates[i].size(); t++){
+                double x = x_candidates[i][t];
+                double y = y_candidates[i][t];
+                vector<double> frenet = getFrenet(x,y,ref_yaw,map_waypoints_x,map_waypoints_y);
+                double car_s = frenet[0];
+                double car_d = frenet[1];
+
+                // Penalize collision
+                for(int i=0; i<sensor_fusion.size(); i++){
+                  float d = sensor_fusion[i][6];
+                  if(abs(car_d - d) < 2){
+                    double check_x = sensor_fusion[i][1];
+                    double check_y = sensor_fusion[i][2];
+                    double check_vx = sensor_fusion[i][3];
+                    double check_vy = sensor_fusion[i][4];
+                    //double check_speed = sqrt(vx*vx+vy*vy);
+                    //double check_car_s = sensor_fusion[i][5];
+
+                    check_x += t * 0.02 * check_vx;
+                    check_y += t * 0.02 * check_vy;
+
+                    if(distance(x,y,check_x,check_y)<10){
+                      cout << "Car is close." << endl;
+                      cost += 1.0e5;
+                    }
+                  }
+                }
+
+                // Penalize lane change
+                cost +=  pow((car_d - (2+4*i)),2);
+
+                // Reward large velocity.
+                //cost -= car_s;
+
+                //if(i==lane && too_close) cost += 100;
+              }
+
+              if(cost < min_cost){
+                min_cost = cost;
+                min_cost_idx = i;
+              }
             }
 
-            tk::spline trajectory_spline;
-            trajectory_spline.set_points(ptsx, ptsy);
-
-            vector<double> next_x_vals;
-          	vector<double> next_y_vals;
-
-            for(int i=0; i<previous_path_x.size(); i++){
-              next_x_vals.push_back(previous_path_x[i]);
-              next_y_vals.push_back(previous_path_y[i]);
+            if(too_close && min_cost < 1.0e4 && abs(car_d - lane*4 - 2) < 0.5){
+              lane = min_cost_idx;
             }
 
-            double target_x = 30.0;
-            double target_y = trajectory_spline(target_x);
-            double target_dist = sqrt(pow(target_x,2)+pow(target_y,2));
-
-            double x_add_on = 0;
-
-            for(int i=0; i<=50-previous_path_x.size(); i++){
-              double N = (target_dist/(0.02*ref_vel/2.24));
-              double x_point = x_add_on + target_x/N;
-              double y_point = trajectory_spline(x_point);
-
-              x_add_on = x_point;
-
-              double x_ref = x_point;
-              double y_ref = y_point;
-
-              x_point = (x_ref * cos(ref_yaw) - y_ref * sin(ref_yaw));
-              y_point = (x_ref * sin(ref_yaw) + y_ref * cos(ref_yaw));
-
-              x_point += ref_x;
-              y_point += ref_y;
-
-              next_x_vals.push_back(x_point);
-              next_y_vals.push_back(y_point);
-            }
+            cout << "Target Lane: " << lane << " car_d = " << car_d << endl;
+            cout << "====================================" << endl;
 
             json msgJson;
 
-            msgJson["next_x"] = next_x_vals;
-          	msgJson["next_y"] = next_y_vals;
+            x_candidates[lane].erase(x_candidates[lane].begin()+50,x_candidates[lane].end());
+            y_candidates[lane].erase(y_candidates[lane].begin()+50,y_candidates[lane].end());
+
+            msgJson["next_x"] = x_candidates[lane];
+          	msgJson["next_y"] = y_candidates[lane];
 
           	auto msg = "42[\"control\","+ msgJson.dump()+"]";
 
