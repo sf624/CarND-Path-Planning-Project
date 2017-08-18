@@ -42,7 +42,6 @@ class FG_eval {
  public:
   // Fitted polynomial paramicients
   Eigen::VectorXd params;
-  tk::spline waypoint_spline;
   FG_eval(Eigen::VectorXd params){
     this->params = params;
   }
@@ -69,9 +68,9 @@ class FG_eval {
       fg[0] += CppAD::pow(vars[js_start + t], 2);
       fg[0] += CppAD::pow(vars[jd_start + t], 2);
       // Add cost to difference between reference velocity in s_direction.
-      fg[0] += 10 * CppAD::pow(
-        CppAD::sqrt(CppAD::pow(vars[vs_start + t], 2)+CppAD::pow(vars[vd_start + t], 2))
-         - ref_v,2);
+      //fg[0] += 10 * CppAD::pow(
+      //  CppAD::sqrt(CppAD::pow(vars[vs_start + t], 2)+CppAD::pow(vars[vd_start + t], 2))
+      //   - ref_v,2);
       // Add cost to difference between reference lane positon in d_direction.
       fg[0] += 10 * CppAD::pow(vars[d_start + t] - ref_d, 2);
     }
@@ -188,6 +187,11 @@ vector<double> OPT::Solve(Eigen::VectorXd state, Eigen::VectorXd params) {
     vars_upperbound[js_start + t] = 5.0;
     vars_upperbound[jd_start + t] = 5.0;
   }
+
+  vars_lowerbound[as_start] = -1.0e19;
+  vars_lowerbound[ad_start] = -1.0e19;
+  vars_upperbound[as_start] = 1.0e19;
+  vars_upperbound[ad_start] = 1.0e19;
 
 
   // Set lower and upper boundary for the constraints

@@ -65,12 +65,12 @@ int ClosestWaypoint(double x, double y, vector<double> maps_x, vector<double> ma
 
 int NextWaypoint(double x, double y, double theta, vector<double> maps_x, vector<double> maps_y)
 {
-
+  cout << "1" << endl;
 	int closestWaypoint = ClosestWaypoint(x,y,maps_x,maps_y);
-
+  cout << "2" << endl;
 	double map_x = maps_x[closestWaypoint];
 	double map_y = maps_y[closestWaypoint];
-
+  cout << "3" << endl;
 	double heading = atan2( (map_y-y),(map_x-x) );
 
 	double angle = abs(theta-heading);
@@ -274,7 +274,7 @@ int main() {
             double ref_y = car_y;
             double ref_yaw = deg2rad(car_yaw);
 
-            if(!opt.is_initial){
+            if(!opt.is_initial && reused_size > 2){
               ref_x = previous_path_x[reused_size-1];
               ref_y = previous_path_y[reused_size-1];
 
@@ -304,14 +304,26 @@ int main() {
             vector<double> _map_waypoints_s;
             vector<double> _map_waypoints_x;
             vector<double> _map_waypoints_y;
+
+            cout << "pass (3.0.1)" << endl;
+
+            cout << ref_x << "," << ref_y << "," << ref_yaw << endl;
             int nextwaypoint = NextWaypoint(ref_x,ref_y,ref_yaw,map_waypoints_x,map_waypoints_y);
 
+            cout << "pass (3.1)" << endl;
+
             for(int i=0; i<4; i++){
-              _map_waypoints_s.push_back(map_waypoints_s[(nextwaypoint+i-2)%map_waypoints_s.size()]);
+              int idx = nextwaypoint+i-2;
+              while(idx < 0) idx += map_waypoints_s.size();
+              while(idx >= map_waypoints_s.size()) idx -= map_waypoints_s.size();
+              _map_waypoints_s.push_back(map_waypoints_s[idx]);
               vector<double> xy = getXY(_map_waypoints_s[i], (2+4*lane), map_waypoints_s, map_waypoints_x, map_waypoints_y);
               _map_waypoints_x.push_back(xy[0]);
               _map_waypoints_y.push_back(xy[1]);
             }
+
+            cout << "pass (3.2)" << endl;
+
 
             for(int i=0; i<_map_waypoints_x.size(); i++){
               double shift_x = _map_waypoints_x[i] - ref_x;
@@ -320,6 +332,9 @@ int main() {
               _map_waypoints_x[i] = (shift_x * cos(0-ref_yaw) - shift_y * sin(0-ref_yaw));
               _map_waypoints_y[i] = (shift_x * sin(0-ref_yaw) + shift_y * cos(0-ref_yaw));
             }
+
+            cout << "pass (3.3)" << endl;
+
 
             tk::spline waypoint_spline;
             waypoint_spline.set_points(_map_waypoints_x, _map_waypoints_y);
