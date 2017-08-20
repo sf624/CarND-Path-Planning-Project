@@ -251,7 +251,13 @@ int main() {
             static double ref_vel = 0;
             static bool is_in_lane_change = false;
             int prev_size = previous_path_x.size();
-            //prev_size = prev_size < 10 ? prev_size : 10;
+            prev_size = prev_size < 50 ? prev_size : 50;
+            if(prev_size > 0){
+              vector<double> sd = getFrenet(previous_path_x[prev_size-1], previous_path_y[prev_size-1],
+                                                    deg2rad(car_yaw), map_waypoints_x, map_waypoints_y);
+              end_path_s = sd[0];
+              end_path_d = sd[1];
+            }
 
             // Sensor fusion START
             //if(prev_size>0){
@@ -339,7 +345,6 @@ int main() {
             vector<vector<double>> y_candidates;
 
             for(int lane=0; lane<3; lane++){
-              tk::spline lane_spline;
               vector<double> ptsx_lane;
               vector<double> ptsy_lane;
 
@@ -360,8 +365,29 @@ int main() {
                 //cout << i << "," << ptsx_lane[i] << endl;
               }
 
+              tk::spline lane_spline;
               lane_spline.set_points(ptsx_lane, ptsy_lane);
 
+              int temp = ptsx_lane.size();
+
+              for(int i=3; i<6; i++){
+                int idx = (closestWaypoint + i - 1 + map_waypoints_s.size()) % map_waypoints_s.size();
+                ptsx_lane.push_back(map_waypoints_x[idx] + (2+4*lane) * map_waypoints_dx[idx]);
+                ptsy_lane.push_back(map_waypoints_y[idx] + (2+4*lane) * map_waypoints_dy[idx]);
+                //cout << idx << "," << ptsx_lane[i] << endl;
+              }
+
+              for(int i=temp; i<ptsx_lane.size(); i++){
+                double shift_x = ptsx_lane[i] - ref_x;
+                double shift_y = ptsy_lane[i] - ref_y;
+
+                ptsx_lane[i] = (shift_x * cos(0-ref_yaw) - shift_y * sin(0-ref_yaw));
+                ptsy_lane[i] = (shift_x * sin(0-ref_yaw) + shift_y * cos(0-ref_yaw));
+                //cout << i << "," << ptsx_lane[i] << endl;
+              }
+
+              tk::spline rough_lane_spline;
+              rough_lane_spline.set_points(ptsx_lane, ptsy_lane);
               /*
                * Generate target-trajectory spline in reference frame, using target-lane spline.
                */
@@ -402,6 +428,9 @@ int main() {
                 double N = (target_dist/(0.02*ref_vel/2.24));
                 double x_point = x_add_on + target_x/N;
                 double y_point = trajectory_spline(x_point);
+                if(i >= 100 - prev_size){
+                  y_point = rough_lane_spline(x_point);
+                }
 
                 x_add_on = x_point;
 
@@ -440,7 +469,7 @@ int main() {
               double check_speed = sqrt(vx*vx+vy*vy);
               double check_car_s = sensor_fusion[i][5];
 
-              if(s_distance(check_car_s,car_s,max_s)>0){
+              if(100>s_distance(check_car_s,car_s,max_s) && s_distance(check_car_s,car_s,max_s)>0){
                 lane_cost[lane] += exp(-abs(s_distance(check_car_s,car_s,max_s)));
               }
             }
@@ -455,69 +484,80 @@ int main() {
             }
             else{
               // see if other lane_cost is lower than present target_lane lane_cost.
+              vector<int> idx_priority;
               int arg_min_lane = min_element(lane_cost.begin(), lane_cost.end()) - lane_cost.begin();
-              if(abs(arg_min_lane - target_lane) != 0 && lane_cost[target_lane] > lane_cost[arg_min_lane] && car_speed > 25) {
-                // Check if lane_change to arg_min_lane does not produce collision.
-                //cout << "Considering lane change from " << target_lane << "to " << arg_min_lane << endl;
-                bool will_collide = false;
-                for(int t=0; t<x_candidates[arg_min_lane].size(); t++){
-                  double x = x_candidates[arg_min_lane][t];
-                  double y = y_candidates[arg_min_lane][t];
-                  vector<double> frenet = getFrenet(x,y,ref_yaw,map_waypoints_x,map_waypoints_y);
-                  double car_s = frenet[0];
-                  double car_d = frenet[1];
+              if(arg_min_lane != target_lane && lane_cost[arg_min_lane] < lane_cost[target_lane]){
+                idx_priority.push_back(arg_min_lane);
+                int the_other_lane = (arg_min_lane+1)%3 != target_lane ? (arg_min_lane+1)%3 : (arg_min_lane+2)%3;
+                if(lane_cost[the_other_lane] < lane_cost[target_lane]) idx_priority.push_back(the_other_lane);
+                if(lane_cost[the_other_lane] == lane_cost[arg_min_lane] &&
+                    abs(target_lane-the_other_lane)-abs(target_lane-arg_min_lane)<0){
+                      int temp = arg_min_lane;
+                      idx_priority[0] = the_other_lane;
+                      idx_priority[1] = arg_min_lane;
+                }
+                for(int idxidx = 0; idxidx<idx_priority.size(); idxidx++){
+                  int test_lane = idx_priority[idxidx];
+                  if(car_speed > 25) {
+                    // Check if lane_change to test_lane does not produce collision.
+                    bool will_collide = false;
+                    for(int t=0; t<x_candidates[test_lane].size(); t++){
+                      double x = x_candidates[test_lane][t];
+                      double y = y_candidates[test_lane][t];
+                      vector<double> frenet = getFrenet(x,y,ref_yaw,map_waypoints_x,map_waypoints_y);
+                      double car_s = frenet[0];
+                      double car_d = frenet[1];
+                      // Penalize collision
+                      for(int i=0; i<sensor_fusion.size(); i++){
+                        float d = sensor_fusion[i][6];
+                        if(abs(car_d - d) < 3){
+                          double check_x = sensor_fusion[i][1];
+                          double check_y = sensor_fusion[i][2];
+                          double check_vx = sensor_fusion[i][3];
+                          double check_vy = sensor_fusion[i][4];
+                          double check_speed = sqrt(check_vx*check_vx+check_vy*check_vy);
+                          double check_car_s = sensor_fusion[i][5];
+                          check_car_s += check_speed * 0.02 * t;
 
-                  // Penalize collision
-                  for(int i=0; i<sensor_fusion.size(); i++){
-                    float d = sensor_fusion[i][6];
-                    if(abs(car_d - d) < 3){
-                      double check_x = sensor_fusion[i][1];
-                      double check_y = sensor_fusion[i][2];
-                      double check_vx = sensor_fusion[i][3];
-                      double check_vy = sensor_fusion[i][4];
-                      double check_speed = sqrt(check_vx*check_vx+check_vy*check_vy);
-                      double check_car_s = sensor_fusion[i][5];
-                      check_car_s += check_speed * 0.02 * t;
+                          //check_x += t * 0.02 * check_vx;
+                          //check_y += t * 0.02 * check_vy;
 
-                      //check_x += t * 0.02 * check_vx;
-                      //check_y += t * 0.02 * check_vy;
-
-                      if(abs(s_distance(car_s,check_car_s,max_s))<15){
-                        will_collide = true;
-                        //cout << "Collision with car_id = " << sensor_fusion[i][0] << " estimated." << endl;
+                          if(abs(s_distance(car_s,check_car_s,max_s))<15){
+                            will_collide = true;
+                            //cout << "Collision with car_id = " << sensor_fusion[i][0] << " estimated." << endl;
+                          }
+                        }
                       }
                     }
+                    if(!will_collide){
+                      cout << "------------------------------" << endl;
+                      for(int i=0;i<3;i++){
+                        if(i == target_lane) cout << "(now) ";
+                        else if (i == test_lane) cout << "----> ";
+                        else cout << "      ";
+                        cout << "lane_cost[" << i << "] = " << lane_cost[i] << endl;
+                      }
+                      cout << endl;
+                      target_lane = test_lane;
+                      is_in_lane_change = true;
+                      cout << "No collision estimated." << endl;
+                      cout << "Executing lane change ... " << flush;
+                      break;
+                    }
                   }
-                }
-
-                if(!will_collide){
-                  cout << "------------------------------" << endl;
-                  for(int i=0;i<3;i++){
-                    if(i == target_lane) cout << "(now) ";
-                    else if (i == arg_min_lane) cout << "(min) ";
-                    else cout << "      ";
-                    cout << "lane_cost[" << i << "] = " << lane_cost[i] << endl;
-                  }
-                  cout << endl;
-                  target_lane = arg_min_lane;
-                  is_in_lane_change = true;
-                  cout << "No collision estimated." << endl;
-                  cout << "Executing lane change ... " << flush;
-                }
-                else{
                 }
               }
             }
 
             json msgJson;
 
-            vector<double> next_x;
-            vector<double> next_y;
-            copy(x_candidates[target_lane].begin(),x_candidates[target_lane].begin()+50,back_inserter(next_x));
-            copy(y_candidates[target_lane].begin(),y_candidates[target_lane].begin()+50,back_inserter(next_y));
+            //vector<double> next_x;
+            //vector<double> next_y;
+            //copy(x_candidates[target_lane].begin(),x_candidates[target_lane].begin()+50,back_inserter(next_x));
+            //copy(y_candidates[target_lane].begin(),y_candidates[target_lane].begin()+50,back_inserter(next_y));
 
-            msgJson["next_x"] = next_x;
-          	msgJson["next_y"] = next_y;
+            msgJson["next_x"] = x_candidates[target_lane];
+          	msgJson["next_y"] = y_candidates[target_lane];
 
           	auto msg = "42[\"control\","+ msgJson.dump()+"]";
 
