@@ -468,9 +468,11 @@ int main() {
             * In order to proceed, other trajectories are evaluated.
             */
 
-            // Evaluate lane.
-
-            vector<double> lane_cost{0,0,0};
+            // Evaluate lanes.
+            vector<vector<double>> lane_cost{{0,0},{0,1},{0,2}};
+            for(int i=0; i<lane_cost.size(); i++){
+              lane_cost[i][0] += exp(-100) * abs(target_lane-i);
+            }
             for(int i=0; i<sensor_fusion.size(); i++){
               double d = sensor_fusion[i][6];
               int lane = (int)round((d-2.0)/4.0);
@@ -481,10 +483,15 @@ int main() {
               double check_speed = sqrt(vx*vx+vy*vy);
               double check_car_s = sensor_fusion[i][5];
 
-              if(100>s_distance(check_car_s,car_s,max_s) && s_distance(check_car_s,car_s,max_s)>0){
-                lane_cost[lane] += exp(-abs(s_distance(check_car_s,car_s,max_s)));
+              if(s_distance(check_car_s,car_s,max_s)>0){
+                lane_cost[lane][0] += exp(-abs(s_distance(check_car_s,car_s,max_s)));
               }
             }
+
+            // Sort lanes' cost. Save target_lane cost before sorting.
+            double target_lane_cost = lane_cost[target_lane][0];
+            sort(lane_cost.begin(),lane_cost.end());
+
 
             // Finite State Machine
             if(is_in_lane_change){
@@ -495,7 +502,60 @@ int main() {
               }
             }
             else{
+              for(int i=0; i<lane_cost.size(); i++){
+                if(lane_cost[i][0] < target_lane_cost){
+                  int test_lane = lane_cost[i][1];
+                  if(car_speed > 25) {
+                    // Check if lane_change to test_lane does not produce collision.
+                    bool will_collide = false;
+                    for(int t=0; t<x_candidates[test_lane].size(); t++){
+                      double x = x_candidates[test_lane][t];
+                      double y = y_candidates[test_lane][t];
+                      vector<double> frenet = getFrenet(x,y,ref_yaw,map_waypoints_x,map_waypoints_y);
+                      double car_s = frenet[0];
+                      double car_d = frenet[1];
+                      // Penalize collision
+                      for(int i=0; i<sensor_fusion.size(); i++){
+                        float d = sensor_fusion[i][6];
+                        if(abs(car_d - d) < 3){
+                          double check_x = sensor_fusion[i][1];
+                          double check_y = sensor_fusion[i][2];
+                          double check_vx = sensor_fusion[i][3];
+                          double check_vy = sensor_fusion[i][4];
+                          double check_speed = sqrt(check_vx*check_vx+check_vy*check_vy);
+                          double check_car_s = sensor_fusion[i][5];
+                          check_car_s += check_speed * 0.02 * t;
+
+                          //check_x += t * 0.02 * check_vx;
+                          //check_y += t * 0.02 * check_vy;
+
+                          if(abs(s_distance(car_s,check_car_s,max_s))<ref_vel/2.24*1){
+                            will_collide = true;
+                            //cout << "Collision with car_id = " << sensor_fusion[i][0] << " estimated." << endl;
+                          }
+                        }
+                      }
+                    }
+                    if(!will_collide){
+                      cout << "------------------------------" << endl;
+                      for(int i=0;i<3;i++){
+                        if(lane_cost[i][1] == target_lane) cout << "(now)  ";
+                        else if (lane_cost[i][1] == test_lane) cout << "(next) ";
+                        else cout << "       ";
+                        cout << "lane_cost[" << lane_cost[i][1] << "] = " << lane_cost[i][0] << endl;
+                      }
+                      cout << endl;
+                      target_lane = test_lane;
+                      is_in_lane_change = true;
+                      cout << "No collision estimated." << endl;
+                      cout << "Executing lane change ... " << flush;
+                      break;
+                    }
+                  }
+                }
+              }
               // see if other lane_cost is lower than present target_lane lane_cost.
+              #if 0
               vector<int> idx_priority;
               int arg_min_lane = min_element(lane_cost.begin(), lane_cost.end()) - lane_cost.begin();
               if(arg_min_lane != target_lane && lane_cost[arg_min_lane] < lane_cost[target_lane]){
@@ -559,6 +619,7 @@ int main() {
                   }
                 }
               }
+              #endif
             }
 
             json msgJson;
