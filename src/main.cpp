@@ -267,7 +267,7 @@ int main() {
             //find ref_v to use
             double leading_car_speed = 50;
             double min_distance = 1e9;
-            bool too_close = false;
+            bool emergecy_brake = false;
             for(int i=0; i<sensor_fusion.size(); i++){
               float d = sensor_fusion[i][6];
               //if(d < (2+4*target_lane+2) && d > (2+4*target_lane-2)){
@@ -276,8 +276,13 @@ int main() {
                 double vy = sensor_fusion[i][4];
                 double check_speed = sqrt(vx*vx+vy*vy);
                 double check_car_s = sensor_fusion[i][5];
-                check_car_s += check_speed * 0.02 * prev_size;
 
+                if(s_distance(check_car_s,car_s,max_s)>0 && s_distance(check_car_s,end_path_s,max_s)<0){
+                  emergecy_brake = true;
+                  break;
+                }
+
+                check_car_s += check_speed * 0.02 * prev_size;
                 if(s_distance(check_car_s,end_path_s,max_s)>0){
                   if(s_distance(check_car_s,end_path_s,max_s) < min_distance){
                     min_distance = s_distance(check_car_s,end_path_s,max_s);
@@ -288,8 +293,10 @@ int main() {
             }
 
 
-
-            if( (ref_vel > leading_car_speed
+            if(emergecy_brake){
+              ref_vel -= 0.224 * 1.5;
+            }
+            else if( (ref_vel > leading_car_speed
               && pow(ref_vel/2.24 - leading_car_speed/2.24,2)/10.0 > (min_distance - leading_car_speed / 2.24 * 1.5))
               || pow(ref_vel/2.24 - leading_car_speed/2.24,2)/10.0 < (leading_car_speed / 2.24 * 1.5 - min_distance) ){
               ref_vel -= 0.224;
