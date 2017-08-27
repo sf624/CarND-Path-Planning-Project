@@ -297,8 +297,8 @@ int main() {
               ref_vel -= 0.224 * 1.5;
             }
             else if( (ref_vel > leading_car_speed
-              && pow(ref_vel/2.24 - leading_car_speed/2.24,2)/10.0 > (min_distance - leading_car_speed / 2.24 * 1.5))
-              || pow(ref_vel/2.24 - leading_car_speed/2.24,2)/10.0 < (leading_car_speed / 2.24 * 1.5 - min_distance) ){
+              && pow(ref_vel/2.24 - leading_car_speed/2.24,2)/10.0 > (min_distance - leading_car_speed / 2.24 * 2.0))
+              || pow(ref_vel/2.24 - leading_car_speed/2.24,2)/10.0 < (leading_car_speed / 2.24 * 2.0 - min_distance) ){
               ref_vel -= 0.224;
               //cout << min_distance << endl;
             }
@@ -529,7 +529,7 @@ int main() {
                           //check_x += t * 0.02 * check_vx;
                           //check_y += t * 0.02 * check_vy;
 
-                          if(abs(s_distance(car_s,check_car_s,max_s))<ref_vel/2.24*1){
+                          if(abs(s_distance(car_s,check_car_s,max_s))<max(ref_vel/2.24,check_speed)*1){
                             will_collide = true;
                             //cout << "Collision with car_id = " << sensor_fusion[i][0] << " estimated." << endl;
                           }
