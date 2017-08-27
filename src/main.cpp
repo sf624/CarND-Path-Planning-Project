@@ -251,47 +251,52 @@ int main() {
             static double ref_vel = 0;
             static bool is_in_lane_change = false;
             int prev_size = previous_path_x.size();
-            prev_size = prev_size < 50 ? prev_size : 50;
-            if(prev_size > 0){
-              vector<double> sd = getFrenet(previous_path_x[prev_size-1], previous_path_y[prev_size-1],
-                                                    deg2rad(car_yaw), map_waypoints_x, map_waypoints_y);
-              end_path_s = sd[0];
-              end_path_d = sd[1];
-            }
+            //prev_size = prev_size < 50 ? prev_size : 50;
+            //if(prev_size > 0){
+            //  vector<double> sd = getFrenet(previous_path_x[prev_size-1], previous_path_y[prev_size-1],
+            //                                        deg2rad(car_yaw), map_waypoints_x, map_waypoints_y);
+            //  end_path_s = sd[0];
+            //  end_path_d = sd[1];
+            //}
 
             // Sensor fusion START
             //if(prev_size>0){
             //  car_s = end_path_s;
             //}
 
-            bool too_close = false;
-
             //find ref_v to use
             double leading_car_speed = 50;
+            double min_distance = 1e9;
+            bool too_close = false;
             for(int i=0; i<sensor_fusion.size(); i++){
               float d = sensor_fusion[i][6];
-              if(d < (2+4*target_lane+2) && d > (2+4*target_lane-2)){
+              //if(d < (2+4*target_lane+2) && d > (2+4*target_lane-2)){
+              if(abs(end_path_d - d)<3){
                 double vx = sensor_fusion[i][3];
                 double vy = sensor_fusion[i][4];
                 double check_speed = sqrt(vx*vx+vy*vy);
                 double check_car_s = sensor_fusion[i][5];
                 check_car_s += check_speed * 0.02 * prev_size;
 
-                if(s_distance(check_car_s,car_s,max_s)>0
-                  && abs(s_distance(check_car_s,end_path_s,max_s))<30){
-                  leading_car_speed = check_speed * 2.24;
-                  too_close = true;
+                if(s_distance(check_car_s,end_path_s,max_s)>0){
+                  if(s_distance(check_car_s,end_path_s,max_s) < min_distance){
+                    min_distance = s_distance(check_car_s,end_path_s,max_s);
+                    leading_car_speed = check_speed * 2.24;
+                  }
                 }
               }
             }
 
-            if(!is_in_lane_change){
-              if(too_close && ref_vel > leading_car_speed - 1){
-                ref_vel -= 0.224;
-              }
-              else if(ref_vel < 49.5){
-                ref_vel += 0.224;
-              }
+
+
+            if( (ref_vel > leading_car_speed
+              && pow(ref_vel/2.24 - leading_car_speed/2.24,2)/10.0 > (min_distance - leading_car_speed / 2.24 * 1.5))
+              || pow(ref_vel/2.24 - leading_car_speed/2.24,2)/10.0 < (leading_car_speed / 2.24 * 1.5 - min_distance) ){
+              ref_vel -= 0.224;
+              //cout << min_distance << endl;
+            }
+            else if(ref_vel < 49.5){
+              ref_vel += 0.224;
             }
 
             // Sensor fusion END
@@ -522,7 +527,7 @@ int main() {
                           //check_x += t * 0.02 * check_vx;
                           //check_y += t * 0.02 * check_vy;
 
-                          if(abs(s_distance(car_s,check_car_s,max_s))<15){
+                          if(abs(s_distance(car_s,check_car_s,max_s))<ref_vel/2.24*1){
                             will_collide = true;
                             //cout << "Collision with car_id = " << sensor_fusion[i][0] << " estimated." << endl;
                           }
@@ -551,13 +556,13 @@ int main() {
 
             json msgJson;
 
-            //vector<double> next_x;
-            //vector<double> next_y;
-            //copy(x_candidates[target_lane].begin(),x_candidates[target_lane].begin()+50,back_inserter(next_x));
-            //copy(y_candidates[target_lane].begin(),y_candidates[target_lane].begin()+50,back_inserter(next_y));
+            vector<double> next_x;
+            vector<double> next_y;
+            copy(x_candidates[target_lane].begin(),x_candidates[target_lane].begin()+50,back_inserter(next_x));
+            copy(y_candidates[target_lane].begin(),y_candidates[target_lane].begin()+50,back_inserter(next_y));
 
-            msgJson["next_x"] = x_candidates[target_lane];
-          	msgJson["next_y"] = y_candidates[target_lane];
+            msgJson["next_x"] = next_x;
+          	msgJson["next_y"] = next_y;
 
           	auto msg = "42[\"control\","+ msgJson.dump()+"]";
 
