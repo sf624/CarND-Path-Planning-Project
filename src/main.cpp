@@ -246,31 +246,21 @@ int main() {
           	auto sensor_fusion = j[1]["sensor_fusion"];
 
 
-          	// TODO: define a path made up of (x,y) points that the car will visit sequentially every .02 seconds
-            static int target_lane = 1;
-            static double ref_vel = 0;
-            static bool is_in_lane_change = false;
+          	// Static variables used.
+            static int target_lane = 1;               // Current target lane to follow. 0 ... left, 1 ... middle, 2 ... right
+            static double ref_vel = 0;                // Current reference velocity in mph.
+            static bool is_in_lane_change = false;    // Whether or not the car is in lane changing mode or not.
+
+            // Extract size of previous unused path from simulator
             int prev_size = previous_path_x.size();
-            //prev_size = prev_size < 50 ? prev_size : 50;
-            //if(prev_size > 0){
-            //  vector<double> sd = getFrenet(previous_path_x[prev_size-1], previous_path_y[prev_size-1],
-            //                                        deg2rad(car_yaw), map_waypoints_x, map_waypoints_y);
-            //  end_path_s = sd[0];
-            //  end_path_d = sd[1];
-            //}
 
-            // Sensor fusion START
-            //if(prev_size>0){
-            //  car_s = end_path_s;
-            //}
 
-            //find ref_v to use
+            // Determine reference velocity to generate trajectory.
             double leading_car_speed = 50;
             double min_distance = 1e9;
             bool emergecy_brake = false;
             for(int i=0; i<sensor_fusion.size(); i++){
               float d = sensor_fusion[i][6];
-              //if(d < (2+4*target_lane+2) && d > (2+4*target_lane-2)){
               if(abs(end_path_d - d)<3){
                 double vx = sensor_fusion[i][3];
                 double vy = sensor_fusion[i][4];
@@ -306,9 +296,10 @@ int main() {
               ref_vel += 0.224;
             }
 
-            // Sensor fusion END
 
 
+            // Extract last two points of unused trajectory and
+            // use them to define reference frame where another new trajecty is generated.
             vector<double> ptsx;
             vector<double> ptsy;
 
@@ -349,10 +340,9 @@ int main() {
               ptsy[i] = (shift_x * sin(0-ref_yaw) + shift_y * cos(0-ref_yaw));
             }
 
-            /*
-             * Generate target-lane spline in reference frame, using 5 closest waypoint.
-            */
 
+
+            // Generate three trajectory candidates which each corresponds to three differenct target lane.
             vector<vector<double>> x_candidates;
             vector<vector<double>> y_candidates;
 
@@ -360,12 +350,12 @@ int main() {
               vector<double> ptsx_lane;
               vector<double> ptsy_lane;
 
+              // Extract 3 nearest waypoints and generate spline interpolated lanes' points.
               int closestWaypoint = ClosestWaypoint(ref_x, ref_y, map_waypoints_x, map_waypoints_y);
               for(int i=0; i<3; i++){
                 int idx = (closestWaypoint + i - 1 + map_waypoints_s.size()) % map_waypoints_s.size();
                 ptsx_lane.push_back(map_waypoints_x[idx] + (2+4*lane) * map_waypoints_dx[idx]);
                 ptsy_lane.push_back(map_waypoints_y[idx] + (2+4*lane) * map_waypoints_dy[idx]);
-                //cout << idx << "," << ptsx_lane[i] << endl;
               }
 
               for(int i=0; i<ptsx_lane.size(); i++){
@@ -374,19 +364,20 @@ int main() {
 
                 ptsx_lane[i] = (shift_x * cos(0-ref_yaw) - shift_y * sin(0-ref_yaw));
                 ptsy_lane[i] = (shift_x * sin(0-ref_yaw) + shift_y * cos(0-ref_yaw));
-                //cout << i << "," << ptsx_lane[i] << endl;
               }
 
               tk::spline lane_spline;
               lane_spline.set_points(ptsx_lane, ptsy_lane);
 
+
+              // Extract another 3 waypoints forward to ego car to generate
+              // roughly spline interploted lanes' point.
               int temp = ptsx_lane.size();
 
               for(int i=3; i<6; i++){
                 int idx = (closestWaypoint + i - 1 + map_waypoints_s.size()) % map_waypoints_s.size();
                 ptsx_lane.push_back(map_waypoints_x[idx] + (2+4*lane) * map_waypoints_dx[idx]);
                 ptsy_lane.push_back(map_waypoints_y[idx] + (2+4*lane) * map_waypoints_dy[idx]);
-                //cout << idx << "," << ptsx_lane[i] << endl;
               }
 
               for(int i=temp; i<ptsx_lane.size(); i++){
@@ -395,16 +386,13 @@ int main() {
 
                 ptsx_lane[i] = (shift_x * cos(0-ref_yaw) - shift_y * sin(0-ref_yaw));
                 ptsy_lane[i] = (shift_x * sin(0-ref_yaw) + shift_y * cos(0-ref_yaw));
-                //cout << i << "," << ptsx_lane[i] << endl;
               }
 
               tk::spline rough_lane_spline;
               rough_lane_spline.set_points(ptsx_lane, ptsy_lane);
-              /*
-               * Generate target-trajectory spline in reference frame, using target-lane spline.
-               */
 
-              // Intend to reach target-lane in 2 seconds.
+              // Generate spline interpolated target trajectry, which ego vehicle should follow.
+              // Tre trajectory intend to let ego car reach the target lane in 2 seconds when over 25m/s.
               vector<double> temp_ptsx;
               vector<double> temp_ptsy;
               copy(ptsx.begin(),ptsx.end(),back_inserter(temp_ptsx));
@@ -421,6 +409,7 @@ int main() {
               tk::spline trajectory_spline;
               trajectory_spline.set_points(temp_ptsx, temp_ptsy);
 
+              // Generate candidate target trajectory in simulator's x-y frame.
               vector<double> next_x_vals;
               vector<double> next_y_vals;
 
@@ -434,7 +423,6 @@ int main() {
               double target_dist = sqrt(pow(target_x,2)+pow(target_y,2));
 
               double x_add_on = 0;
-              //double target_speed = i == lane ? ref_vel : (ref_vel > 49.5 ? ref_vel : ref_vel + 0.224);
 
               for(int i=0; i<250-prev_size; i++){
                 double N = (target_dist/(0.02*ref_vel/2.24));
@@ -463,12 +451,7 @@ int main() {
               y_candidates.push_back(next_y_vals);
             }
 
-            /*
-            * If too_close, attempt other trajectory.
-            * In order to proceed, other trajectories are evaluated.
-            */
-
-            // Evaluate lanes.
+            // Evaluate lanes. (NOTE: Collision is not evaluated in this section)
             vector<vector<double>> lane_cost{{0,0},{0,1},{0,2}};
             for(int i=0; i<lane_cost.size(); i++){
               lane_cost[i][0] += exp(-100) * abs(target_lane-i);
@@ -493,7 +476,11 @@ int main() {
             sort(lane_cost.begin(),lane_cost.end());
 
 
-            // Finite State Machine
+            // Finite State Machine.
+            // If the ego car is in lane changing mode, just look whether the ego car reached the target lane.
+            // If not in lane chanding mode, collisions are evaluated in the order of lanes' costs.
+            // The lane with smallest lanes' cost
+
             if(is_in_lane_change){
               // do nothing, but switch is_in_lane_change if accomplished.
               if(abs(car_d - (target_lane*4+2)) < 0.5){
