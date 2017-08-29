@@ -13,6 +13,9 @@ If the nearset car is within 1 sec interval, emergency braking is executed. (l.2
 
 3. Target trajectory candidates generation (ll.308-459)
 Three different trajectory which differs in target lane are generated according to reference velocity.
+The trajectories are 5 seconds long which was necessary for sufficient collision estimation in next section 4.
+(Note that only first 1 seconds are actually executed in simulator, since remaining trajectories are refined,
+in next execution of h.onMessage (l.206).)
 If the reference velocity is over 25 mph, the trajectory intend to reach target lane in 2 seconds. (ll.408-414)
 
 4. Lane evaluation. (ll.461-510)
