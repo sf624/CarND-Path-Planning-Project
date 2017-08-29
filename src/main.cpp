@@ -251,8 +251,15 @@ int main() {
             static double ref_vel = 0;                // Current reference velocity in mph.
             static bool is_in_lane_change = false;    // Whether or not the car is in lane changing mode or not.
 
-            // Extract size of previous unused path from simulator
-            int prev_size = previous_path_x.size();
+            // Extract first 50 points from previous unused trajectory.
+            // Which means trajectory over 1 seconds are refined.
+            int prev_size = previous_path_x.size() < 50 ? previous_path_x.size() : 50;
+            if(prev_size > 0){
+              vector<double> sd = getFrenet(previous_path_x[prev_size], previous_path_y[prev_size],
+                                  deg2rad(car_yaw), map_waypoints_x, map_waypoints_y);
+              end_path_s = sd[0];
+              end_path_d = sd[1];
+            }
 
 
             // Determine reference velocity to generate trajectory.
@@ -451,11 +458,15 @@ int main() {
               y_candidates.push_back(next_y_vals);
             }
 
-            // Evaluate lanes. (NOTE: Collision is not evaluated in this section)
-            vector<vector<double>> lane_cost{{0,0},{0,1},{0,2}};
-            for(int i=0; i<lane_cost.size(); i++){
-              lane_cost[i][0] += exp(-100) * abs(target_lane-i);
+            // Evaluate lanes.
+            // Lane cost below stores general cost and special collision cost.
+            vector<double> lane_cost{0,0,0};
+            vector<double> lane_collision_cost{0,0,0};
+            // Penalise lane which has distance between target lane.
+            for(int lane=0; lane<lane_cost.size(); lane++){
+              lane_cost[lane] += exp(-100) * abs(target_lane-lane);
             }
+            // Penalise lane which has objective cars in front of ego car.
             for(int i=0; i<sensor_fusion.size(); i++){
               double d = sensor_fusion[i][6];
               int lane = (int)round((d-2.0)/4.0);
@@ -467,20 +478,42 @@ int main() {
               double check_car_s = sensor_fusion[i][5];
 
               if(s_distance(check_car_s,car_s,max_s)>0){
-                lane_cost[lane][0] += exp(-abs(s_distance(check_car_s,car_s,max_s)));
+                lane_cost[lane] += exp(-abs(s_distance(check_car_s,car_s,max_s)));
               }
             }
+            // Penalise lane which where collision is estimated.
+            for(int lane=0; lane<lane_cost.size(); lane++){
+              for(int t=0; t<x_candidates[lane].size(); t++){
+                double x = x_candidates[lane][t];
+                double y = y_candidates[lane][t];
+                vector<double> frenet = getFrenet(x,y,ref_yaw,map_waypoints_x,map_waypoints_y);
+                double car_s = frenet[0];
+                double car_d = frenet[1];
+                // Penalize collision
+                for(int i=0; i<sensor_fusion.size(); i++){
+                  float d = sensor_fusion[i][6];
+                  if(abs(car_d - d) < 3){
+                    double check_x = sensor_fusion[i][1];
+                    double check_y = sensor_fusion[i][2];
+                    double check_vx = sensor_fusion[i][3];
+                    double check_vy = sensor_fusion[i][4];
+                    double check_speed = sqrt(check_vx*check_vx+check_vy*check_vy);
+                    double check_car_s = sensor_fusion[i][5];
+                    check_car_s += check_speed * 0.02 * t;
 
-            // Sort lanes' cost. Save target_lane cost before sorting.
-            double target_lane_cost = lane_cost[target_lane][0];
-            sort(lane_cost.begin(),lane_cost.end());
+                    if(abs(s_distance(car_s,check_car_s,max_s))<max(ref_vel/2.24,check_speed)*1){
+                      lane_collision_cost[lane] += 1.0;
+                    }
+                  }
+                }
+              }
+            }
 
 
             // Finite State Machine.
             // If the ego car is in lane changing mode, just look whether the ego car reached the target lane.
-            // If not in lane chanding mode, collisions are evaluated in the order of lanes' costs.
-            // The lane with smallest lanes' cost
-
+            // If not in lane chanding mode and collision-free lane with smallest lanes' cost
+            // differs from current target lane, lane changing mode is exexuted.
             if(is_in_lane_change){
               // do nothing, but switch is_in_lane_change if accomplished.
               if(abs(car_d - (target_lane*4+2)) < 0.5){
@@ -489,135 +522,35 @@ int main() {
               }
             }
             else{
-              for(int i=0; i<lane_cost.size(); i++){
-                if(lane_cost[i][0] < target_lane_cost){
-                  int test_lane = lane_cost[i][1];
-                  if(car_speed > 25) {
-                    // Check if lane_change to test_lane does not produce collision.
-                    bool will_collide = false;
-                    for(int t=0; t<x_candidates[test_lane].size(); t++){
-                      double x = x_candidates[test_lane][t];
-                      double y = y_candidates[test_lane][t];
-                      vector<double> frenet = getFrenet(x,y,ref_yaw,map_waypoints_x,map_waypoints_y);
-                      double car_s = frenet[0];
-                      double car_d = frenet[1];
-                      // Penalize collision
-                      for(int i=0; i<sensor_fusion.size(); i++){
-                        float d = sensor_fusion[i][6];
-                        if(abs(car_d - d) < 3){
-                          double check_x = sensor_fusion[i][1];
-                          double check_y = sensor_fusion[i][2];
-                          double check_vx = sensor_fusion[i][3];
-                          double check_vy = sensor_fusion[i][4];
-                          double check_speed = sqrt(check_vx*check_vx+check_vy*check_vy);
-                          double check_car_s = sensor_fusion[i][5];
-                          check_car_s += check_speed * 0.02 * t;
-
-                          //check_x += t * 0.02 * check_vx;
-                          //check_y += t * 0.02 * check_vy;
-
-                          if(abs(s_distance(car_s,check_car_s,max_s))<max(ref_vel/2.24,check_speed)*1){
-                            will_collide = true;
-                            //cout << "Collision with car_id = " << sensor_fusion[i][0] << " estimated." << endl;
-                          }
-                        }
-                      }
-                    }
-                    if(!will_collide){
-                      cout << "------------------------------" << endl;
-                      for(int i=0;i<3;i++){
-                        if(lane_cost[i][1] == target_lane) cout << "(now)  ";
-                        else if (lane_cost[i][1] == test_lane) cout << "(next) ";
-                        else cout << "       ";
-                        cout << "lane_cost[" << lane_cost[i][1] << "] = " << lane_cost[i][0] << endl;
-                      }
-                      cout << endl;
-                      target_lane = test_lane;
-                      is_in_lane_change = true;
-                      cout << "No collision estimated." << endl;
-                      cout << "Executing lane change ... " << flush;
-                      break;
-                    }
-                  }
+              int argmin_lane = distance(lane_cost.begin(), min_element(lane_cost.begin(),lane_cost.end()) );
+              // Note: Collision free lane collision cost must be smaller than 1.0
+              if(argmin_lane != target_lane && lane_collision_cost[argmin_lane] < 1.0){
+                is_in_lane_change = true;
+                cout << "------------------------------" << endl;
+                for(int lane=0;lane<3;lane++){
+                  if(lane == target_lane) cout << "(now) ";
+                  else if (lane == argmin_lane) cout << "(min) ";
+                  else cout << "      ";
+                  cout << "lane_cost[" << lane << "] = " << lane_cost[lane] << endl;
                 }
+                cout << endl;
+                target_lane = argmin_lane;
+                cout << "No collision estimated." << endl;
+                cout << "Executing lane change ... " << flush;
               }
-              // see if other lane_cost is lower than present target_lane lane_cost.
-              #if 0
-              vector<int> idx_priority;
-              int arg_min_lane = min_element(lane_cost.begin(), lane_cost.end()) - lane_cost.begin();
-              if(arg_min_lane != target_lane && lane_cost[arg_min_lane] < lane_cost[target_lane]){
-                idx_priority.push_back(arg_min_lane);
-                int the_other_lane = (arg_min_lane+1)%3 != target_lane ? (arg_min_lane+1)%3 : (arg_min_lane+2)%3;
-                if(lane_cost[the_other_lane] < lane_cost[target_lane]) idx_priority.push_back(the_other_lane);
-                if(lane_cost[the_other_lane] == lane_cost[arg_min_lane] &&
-                    abs(target_lane-the_other_lane)-abs(target_lane-arg_min_lane)<0){
-                      int temp = arg_min_lane;
-                      idx_priority[0] = the_other_lane;
-                      idx_priority[1] = arg_min_lane;
-                }
-                for(int idxidx = 0; idxidx<idx_priority.size(); idxidx++){
-                  int test_lane = idx_priority[idxidx];
-                  if(car_speed > 25) {
-                    // Check if lane_change to test_lane does not produce collision.
-                    bool will_collide = false;
-                    for(int t=0; t<x_candidates[test_lane].size(); t++){
-                      double x = x_candidates[test_lane][t];
-                      double y = y_candidates[test_lane][t];
-                      vector<double> frenet = getFrenet(x,y,ref_yaw,map_waypoints_x,map_waypoints_y);
-                      double car_s = frenet[0];
-                      double car_d = frenet[1];
-                      // Penalize collision
-                      for(int i=0; i<sensor_fusion.size(); i++){
-                        float d = sensor_fusion[i][6];
-                        if(abs(car_d - d) < 3){
-                          double check_x = sensor_fusion[i][1];
-                          double check_y = sensor_fusion[i][2];
-                          double check_vx = sensor_fusion[i][3];
-                          double check_vy = sensor_fusion[i][4];
-                          double check_speed = sqrt(check_vx*check_vx+check_vy*check_vy);
-                          double check_car_s = sensor_fusion[i][5];
-                          check_car_s += check_speed * 0.02 * t;
-
-                          //check_x += t * 0.02 * check_vx;
-                          //check_y += t * 0.02 * check_vy;
-
-                          if(abs(s_distance(car_s,check_car_s,max_s))<ref_vel/2.24*1){
-                            will_collide = true;
-                            //cout << "Collision with car_id = " << sensor_fusion[i][0] << " estimated." << endl;
-                          }
-                        }
-                      }
-                    }
-                    if(!will_collide){
-                      cout << "------------------------------" << endl;
-                      for(int i=0;i<3;i++){
-                        if(i == target_lane) cout << "(now) ";
-                        else if (i == test_lane) cout << "----> ";
-                        else cout << "      ";
-                        cout << "lane_cost[" << i << "] = " << lane_cost[i] << endl;
-                      }
-                      cout << endl;
-                      target_lane = test_lane;
-                      is_in_lane_change = true;
-                      cout << "No collision estimated." << endl;
-                      cout << "Executing lane change ... " << flush;
-                      break;
-                    }
-                  }
-                }
-              }
-              #endif
             }
 
             json msgJson;
 
-            vector<double> next_x;
-            vector<double> next_y;
-            copy(x_candidates[target_lane].begin(),x_candidates[target_lane].begin()+50,back_inserter(next_x));
-            copy(y_candidates[target_lane].begin(),y_candidates[target_lane].begin()+50,back_inserter(next_y));
+            // Only first 50 target trajectory points are sent to simulator.
+            // Which lasts for 1 seconds.
+            //vector<double> next_x;
+            //vector<double> next_y;
+            //copy(x_candidates[target_lane].begin(),x_candidates[target_lane].begin()+100,back_inserter(next_x));
+            //copy(y_candidates[target_lane].begin(),y_candidates[target_lane].begin()+100,back_inserter(next_y));
 
-            msgJson["next_x"] = next_x;
-          	msgJson["next_y"] = next_y;
+            msgJson["next_x"] = x_candidates[target_lane];
+          	msgJson["next_y"] = y_candidates[target_lane];
 
           	auto msg = "42[\"control\","+ msgJson.dump()+"]";
 
