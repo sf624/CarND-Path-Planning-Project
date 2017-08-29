@@ -16,7 +16,7 @@ set(CMAKE_CXX_FLAGS, "${CXX_FLAGS}")
 
 
 
-set(sources src/opt.cpp src/main.cpp)
+set(sources src/main.cpp)
 
 
 include_directories(/usr/local/include)
@@ -48,4 +48,4 @@ add_executable(path_planning ${sources})
 
 
 
-target_link_libraries(path_planning ipopt z ssl uv uWS)
+target_link_libraries(path_planning z ssl uv uWS)
