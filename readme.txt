@@ -39,5 +39,5 @@ Which means there exists follwing 6 different states.
 Note that this FMS does not memorize the lane from which the car departed in lane change.
 Although, the lane change works in pratice.
 
-Lane change is executed if the minimum lane cost is smaller than current lane cost
+Lane change is executed only if the minimum lane cost is smaller than current lane cost
 and also there's not collision estimated. (l.527)
